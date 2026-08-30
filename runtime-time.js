@@ -1,3 +1,5 @@
+import { extractCleanUserRequest } from './query-safety.js';
+
 const TEMPORAL_SIGNAL_PATTERN = /(?:\b(?:latest|current|currently|recent|recently|today|tonight|tomorrow|yesterday|now|this\s+(?:week|month|year)|(?:next|last)\s+(?:week|month|year)|as\s+of|real[- ]?time)\b|最新|当前|目前|现在|今日|今天|今晚|明日|明天|后天|後天|昨日|昨天|截至|实时|最近|近期|本(?:周|週|月|年|季度)|(?:上|下)(?:周|週|星期|月|季度|季|年)|明年|去年|前年|来年|今(?:日|週|月|年)|何月何日|几月几(?:日|号)|几号|星期几|周几|几点)/iu;
 const DAY_AFTER_TOMORROW_PATTERN = /(?:\bday\s+after\s+tomorrow\b|后天|後天)/iu;
 const TOMORROW_PATTERN = /(?:\btomorrow\b|明日|明天)/iu;
@@ -265,7 +267,8 @@ export function captureRuntimeClock({ now = new Date(), timeZone = '' } = {}) {
  * @returns {'none'|'relative'|'clock_only'}
  */
 export function classifyTemporalRequest(value) {
-    const original = normalizeText(value);
+    const rawClean = extractCleanUserRequest(value);
+    const original = normalizeText(rawClean || value);
     if (!original) return 'none';
     if (
         ONLY_PROVIDED_CONTEXT_PATTERN.test(original)

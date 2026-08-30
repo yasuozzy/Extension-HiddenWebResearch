@@ -196,9 +196,35 @@ assert.deepEqual(planningSchema.value.properties.action.enum, ['SEARCH', 'DONE']
 assert.equal(planningSchema.value.properties.queries.maxItems, 2);
 assert.equal(planningSchema.value.properties.queries.items.properties.query.maxLength, 120);
 assert.equal(planningSchema.value.properties.unresolved.maxItems, 8);
-
 const assessmentSchema = buildPlannerJsonSchema(2, true);
 assert.deepEqual(assessmentSchema.value.properties.action.enum, ['DONE']);
 assert.equal(assessmentSchema.value.properties.queries.maxItems, 0);
+
+// Verify that prior turns and latest user request strip <act> / 剧情推进
+const actChat = [
+    { is_user: true, mes: '查一下天气\n<act>角色行动台词</act>' },
+    { is_user: false, mes: '好的\n<thought>思考中</thought>' },
+    { is_user: true, mes: '东京明天几度？\n剧情推进\n<act>### 千早爱音\nnow: 弹吉他</act>' },
+];
+const actPriorTurns = buildPlannerPriorTurns(actChat, actChat[2], contextSettings);
+assert.deepEqual(actPriorTurns, [
+    { role: 'user', content: '查一下天气' },
+    { role: 'assistant', content: '好的' },
+]);
+
+const actPrompts = buildPlannerPrompts({
+    adapter: 'auto',
+    latestUserRequest: actChat[2].mes,
+    priorTurns: actPriorTurns,
+    evidence: [],
+    seenQueries: [],
+    unresolvedGaps: [],
+    round: 1,
+    queryLimit: 1,
+    settings: plannerSettings,
+    runtimeClock,
+});
+assert.match(actPrompts.userPrompt, /"latest_user_request": "东京明天几度？"/u);
+assert.doesNotMatch(actPrompts.userPrompt, /千早爱音|弹吉他|剧情推进/u);
 
 console.log('Planner prompt isolation and strategy instructions: all assertions passed');

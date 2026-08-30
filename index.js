@@ -90,6 +90,7 @@ import {
     buildSafePurposeFallbackQuery,
     buildSafeFallbackQuery,
     containsSensitiveQueryMaterial,
+    extractCleanUserRequest,
     validatePreparedSearchQuery,
     validateSearchQueryCandidate,
 } from './query-safety.js';
@@ -2030,7 +2031,8 @@ function buildRecentConversation(chat, settings) {
         .slice(-settings.recentMessages)
         .map(message => {
             const role = message.is_user ? 'USER' : 'ASSISTANT';
-            return `${role}: ${truncateText(normalizeWhitespace(message.mes), 2400)}`;
+            const cleanMes = extractCleanUserRequest(message.mes) || message.mes;
+            return `${role}: ${truncateText(normalizeWhitespace(cleanMes), 2400)}`;
         });
     return truncateText(messages.join('\n\n'), settings.recentContextChars);
 }
@@ -3283,7 +3285,7 @@ async function runStructuredSearchResearch({ chat, chatId, epoch, settings, runt
     const latestUser = getLatestUserMessage(chat);
     if (!latestUser) return null;
 
-    const userText = normalizeWhitespace(latestUser.mes);
+    const userText = normalizeWhitespace(extractCleanUserRequest(latestUser.mes) || latestUser.mes);
     if (hasExplicitNoSearchIntent(userText)) {
         updateStatus('idle', '已遵从本条不联网要求（未调用规划器或搜索服务）');
         return null;
@@ -3909,8 +3911,8 @@ function extractClaudeResearch(rawResponse, includeLinks) {
 async function runClaudeProfileResearch({ chat, chatId, epoch, settings }) {
     const latestUser = getLatestUserMessage(chat);
     if (!latestUser) return null;
-    const userText = normalizeWhitespace(latestUser.mes);
-    const gate = evaluateNativeResearchGate(latestUser.mes, settings.searchPolicy);
+    const userText = normalizeWhitespace(extractCleanUserRequest(latestUser.mes) || latestUser.mes);
+    const gate = evaluateNativeResearchGate(userText, settings.searchPolicy);
     if (!gate.shouldCall) {
         const skipMessages = {
             user_opt_out: '已遵从本条不联网要求（未调用 Claude）',
@@ -4163,8 +4165,8 @@ async function publishGeminiGroundedAnswer(extracted, profile, type) {
 async function runGeminiProfileAnswer({ chat, chatId, epoch, settings }) {
     const latestUser = getLatestUserMessage(chat);
     if (!latestUser) return null;
-    const userText = normalizeWhitespace(latestUser.mes);
-    const gate = evaluateNativeResearchGate(latestUser.mes, settings.searchPolicy);
+    const userText = normalizeWhitespace(extractCleanUserRequest(latestUser.mes) || latestUser.mes);
+    const gate = evaluateNativeResearchGate(userText, settings.searchPolicy);
     if (!gate.shouldCall) {
         const skipMessages = {
             user_opt_out: '已遵从本条不联网要求（未调用 Gemini）',
@@ -6484,83 +6486,172 @@ function bindSettingsUi() {
 
 globalThis.HiddenWebResearch_Intercept = hiddenWebResearchInterceptor;
 
-if (CLIENT_COMPATIBILITY.supported) {
-    eventSource.makeFirst(event_types.GENERATION_STARTED, (type, options, dryRun) => {
-        try {
-            const context = SillyTavern.getContext();
-            generationStartSnapshot = captureGenerationStartSnapshot({
-                type,
-                options,
-                dryRun,
-                chatId: context.chatId,
-                groupId: context.groupId,
-                chat: context.chat,
-                textareaValue: $('#send_textarea').val(),
-            });
-        } catch (error) {
-            generationStartSnapshot = null;
-            debugLog('Unable to capture generation-start snapshot; continuing without preview guard', error);
+async function loadExtensionSettingsHtml() {
+    const candidates = [EXTENSION_ID, 'Extension-HiddenWebResearch'];
+    try {
+        const urlStr = import.meta?.url;
+        if (urlStr) {
+            const parsedUrl = new URL(urlStr, globalThis.location?.href || 'http://localhost');
+            const pathParts = parsedUrl.pathname.split('/scripts/extensions/')[1]?.split('/');
+            if (pathParts && pathParts.length > 0) {
+                pathParts.pop();
+                const dynamicPath = pathParts.join('/');
+                if (dynamicPath && !candidates.includes(dynamicPath)) {
+                    candidates.unshift(dynamicPath);
+                }
+            }
         }
-    });
-    // Register passively at startup as well as reordering at transaction start:
-    // an event already waiting in another async listener keeps this callback in
-    // its snapshot and will observe a credential guard opened in the meantime.
-    eventSource.makeFirst(
-        event_types.CHAT_COMPLETION_SETTINGS_READY,
-        capturePlannerDirectCredentialWindowRequest,
-    );
-    eventSource.on(event_types.GENERATE_AFTER_DATA, handleGenerateAfterData);
-    eventSource.on(event_types.CHAT_COMPLETION_SETTINGS_READY, handleChatCompletionSettingsReady);
-    eventSource.makeLast(
-        event_types.CHAT_COMPLETION_SETTINGS_READY,
-        enforcePlannerDirectCredentialWindowRequest,
-    );
-    eventSource.on(event_types.GENERATION_ENDED, () => {
-        generationStartSnapshot = null;
-        invalidateRun('Generation ended');
-    });
-    eventSource.on(event_types.GENERATION_STOPPED, () => {
-        generationStartSnapshot = null;
-        invalidateRun('Generation stopped');
-        updateStatus('idle', '生成已停止，临时研究已清理');
-    });
-    eventSource.on(event_types.CHAT_CHANGED, () => {
-        generationStartSnapshot = null;
-        invalidateRun('Chat changed', { clearCaches: true });
-        clearSearchLog();
-        updateStatus('idle', '聊天已切换，临时研究与搜索日志已清理');
-    });
+    } catch {
+        // ignore url parsing error
+    }
+
+    for (const candidate of candidates) {
+        try {
+            const html = await renderExtensionTemplateAsync(candidate, 'settings');
+            if (html) return html;
+        } catch {
+            // try next candidate
+        }
+    }
+    throw new Error(`Failed to load template settings from candidates: ${candidates.join(', ')}`);
+}
+
+if (CLIENT_COMPATIBILITY.supported) {
+    try {
+        if (typeof eventSource?.makeFirst === 'function') {
+            eventSource.makeFirst(event_types.GENERATION_STARTED, (type, options, dryRun) => {
+                try {
+                    const context = SillyTavern.getContext();
+                    generationStartSnapshot = captureGenerationStartSnapshot({
+                        type,
+                        options,
+                        dryRun,
+                        chatId: context.chatId,
+                        groupId: context.groupId,
+                        chat: context.chat,
+                        textareaValue: $('#send_textarea').val(),
+                    });
+                } catch (error) {
+                    generationStartSnapshot = null;
+                    debugLog('Unable to capture generation-start snapshot; continuing without preview guard', error);
+                }
+            });
+            // Register passively at startup as well as reordering at transaction start:
+            // an event already waiting in another async listener keeps this callback in
+            // its snapshot and will observe a credential guard opened in the meantime.
+            eventSource.makeFirst(
+                event_types.CHAT_COMPLETION_SETTINGS_READY,
+                capturePlannerDirectCredentialWindowRequest,
+            );
+        } else if (typeof eventSource?.on === 'function') {
+            eventSource.on(event_types.GENERATION_STARTED, (type, options, dryRun) => {
+                try {
+                    const context = SillyTavern.getContext();
+                    generationStartSnapshot = captureGenerationStartSnapshot({
+                        type,
+                        options,
+                        dryRun,
+                        chatId: context?.chatId,
+                        groupId: context?.groupId,
+                        chat: context?.chat,
+                        textareaValue: $('#send_textarea').val(),
+                    });
+                } catch (error) {
+                    generationStartSnapshot = null;
+                }
+            });
+            eventSource.on(
+                event_types.CHAT_COMPLETION_SETTINGS_READY,
+                capturePlannerDirectCredentialWindowRequest,
+            );
+        }
+        eventSource.on(event_types.GENERATE_AFTER_DATA, handleGenerateAfterData);
+        eventSource.on(event_types.CHAT_COMPLETION_SETTINGS_READY, handleChatCompletionSettingsReady);
+        if (typeof eventSource?.makeLast === 'function') {
+            eventSource.makeLast(
+                event_types.CHAT_COMPLETION_SETTINGS_READY,
+                enforcePlannerDirectCredentialWindowRequest,
+            );
+        } else if (typeof eventSource?.on === 'function') {
+            eventSource.on(
+                event_types.CHAT_COMPLETION_SETTINGS_READY,
+                enforcePlannerDirectCredentialWindowRequest,
+            );
+        }
+        eventSource.on(event_types.GENERATION_ENDED, () => {
+            generationStartSnapshot = null;
+            invalidateRun('Generation ended');
+        });
+        eventSource.on(event_types.GENERATION_STOPPED, () => {
+            generationStartSnapshot = null;
+            invalidateRun('Generation stopped');
+            updateStatus('idle', '生成已停止，临时研究已清理');
+        });
+        eventSource.on(event_types.CHAT_CHANGED, () => {
+            generationStartSnapshot = null;
+            invalidateRun('Chat changed', { clearCaches: true });
+            clearSearchLog();
+            updateStatus('idle', '聊天已切换，临时研究与搜索日志已清理');
+        });
+    } catch (eventError) {
+        console.warn(`[${DISPLAY_NAME}] Event registration error:`, eventError);
+    }
 }
 if (ENABLE_SERVER_DEPENDENT_FEATURES) {
-    eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, messageId => {
-        const context = SillyTavern.getContext();
-        const message = context.chat?.[Number(messageId)];
-        renderGeminiSearchEntryPoint(Number(messageId), message);
-    });
+    try {
+        eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, messageId => {
+            const context = SillyTavern.getContext();
+            const message = context.chat?.[Number(messageId)];
+            renderGeminiSearchEntryPoint(Number(messageId), message);
+        });
+    } catch (geminiEventError) {
+        console.warn(`[${DISPLAY_NAME}] Failed to register character message rendered hook:`, geminiEventError);
+    }
 }
 
 jQuery(async () => {
-    if (!CLIENT_COMPATIBILITY.supported) {
-        const missing = CLIENT_COMPATIBILITY.missing.join(', ');
-        console.error(
-            `[${DISPLAY_NAME}] SillyTavern ${MINIMUM_SUPPORTED_CLIENT_VERSION}+ is required; missing: ${missing}`,
-        );
-        toastr.error(
-            `当前 SillyTavern 缺少必要接口，请升级到 ${MINIMUM_SUPPORTED_CLIENT_VERSION} 或更高版本。`,
-            DISPLAY_NAME,
-        );
-        return;
-    }
-    getSettings();
-    await readSecretState();
-    const html = await renderExtensionTemplateAsync(EXTENSION_ID, 'settings');
-    $('#extensions_settings2').append(html);
-    initializeSettingsLayout();
-    bindSettingsUi();
-    if (ENABLE_SERVER_DEPENDENT_FEATURES) {
-        const context = SillyTavern.getContext();
-        context.chat?.forEach((message, messageId) => {
-            renderGeminiSearchEntryPoint(messageId, message);
-        });
+    try {
+        if (!CLIENT_COMPATIBILITY.supported) {
+            const missing = CLIENT_COMPATIBILITY.missing.join(', ');
+            console.error(
+                `[${DISPLAY_NAME}] SillyTavern ${MINIMUM_SUPPORTED_CLIENT_VERSION}+ is required; missing: ${missing}`,
+            );
+            toastr?.error?.(
+                `当前 SillyTavern 缺少必要接口，请升级到 ${MINIMUM_SUPPORTED_CLIENT_VERSION} 或更高版本。`,
+                DISPLAY_NAME,
+            );
+            return;
+        }
+        getSettings();
+        try {
+            await readSecretState();
+        } catch (secretError) {
+            console.warn(`[${DISPLAY_NAME}] readSecretState failed:`, secretError);
+        }
+        try {
+            const html = await loadExtensionSettingsHtml();
+            if (html) {
+                const target = $('#extensions_settings2').length ? $('#extensions_settings2') : $('#extensions_settings');
+                if (target.length) {
+                    target.append(html);
+                    initializeSettingsLayout();
+                    bindSettingsUi();
+                }
+            }
+        } catch (templateError) {
+            console.error(`[${DISPLAY_NAME}] Failed to load settings UI:`, templateError);
+        }
+        if (ENABLE_SERVER_DEPENDENT_FEATURES) {
+            try {
+                const context = SillyTavern.getContext();
+                context.chat?.forEach((message, messageId) => {
+                    renderGeminiSearchEntryPoint(messageId, message);
+                });
+            } catch (geminiError) {
+                console.warn(`[${DISPLAY_NAME}] Gemini entry point rendering failed:`, geminiError);
+            }
+        }
+    } catch (globalInitError) {
+        console.error(`[${DISPLAY_NAME}] Extension initialization failed:`, globalInitError);
     }
 });

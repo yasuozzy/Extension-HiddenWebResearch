@@ -268,6 +268,14 @@ assert.deepEqual(
     evaluateNativeResearchGate('Do not search the web; use only provided context', 'always'),
     { shouldCall: false, reason: 'user_opt_out' },
 );
+assert.deepEqual(
+    evaluateNativeResearchGate(`(画面跳转到二十分钟后，蒋帅、爱音与灯三人已经推开RiNG的大门，恰好看到长崎素世正从另一侧街道款款走来。) (朝素世那边招手)hi 这里这里 (走向前打字翻译给她看)素世同学多久到的我们才从江户川乐器店过来，我们去饮品区坐着聊吧，小笨嘴跟上，素世同学也刚放学吗\n\n剧情推进\n以上是用户的本轮输入，以下act是角色行动和台词：\n<act>\n### 千早爱音\nnow: 站在门边\nbeat: 招手\n### 高松灯\nnow: 看手机\n### 长崎素世\nnow: 走过来\n</act>`, 'auto'),
+    { shouldCall: false, reason: 'no_web_signal' },
+);
+assert.deepEqual(
+    evaluateNativeResearchGate(`查一下江户川乐器店营业时间\n剧情推进\n<act>\n### 角色行动\nnow: 行动\n</act>`, 'auto'),
+    { shouldCall: true, reason: 'explicit_request' },
+);
 assert.match(indexSource, /extension_prompt_types\.IN_CHAT/u);
 assert.match(indexSource, /extension_prompt_roles\.SYSTEM/u);
 assert.match(

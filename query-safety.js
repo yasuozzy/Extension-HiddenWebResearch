@@ -23,6 +23,10 @@ const SEARCH_QUERY_WRAPPER_PATTERNS = Object.freeze([
         userInput: true,
     }),
     Object.freeze({
+        pattern: /^(?:【|\[)?(?:剧情推进|角色行动|行动和台词|act)(?:】|\])?\s*[:：=]\s*/iu,
+        userInput: true,
+    }),
+    Object.freeze({
         pattern: /^(?:the\s+)?(?:latest|current|original)?\s*user(?:'s)?\s*(?:input|message|request|question|instruction)\s*[:=]\s*/iu,
         userInput: true,
     }),
@@ -34,6 +38,20 @@ const SEARCH_QUERY_WRAPPER_PATTERNS = Object.freeze([
         pattern: /^(?:search(?:\s+query)?|web\s+search|搜索(?:查询|关键词|词)?|查询(?:关键词|词)?)\s*[:：=]\s*/iu,
         userInput: false,
     }),
+]);
+
+const INJECTED_ARTIFACT_BLOCK_PATTERNS = Object.freeze([
+    /<(?:act|thought|thinking|think|cot|plot|details|action|script|director|narrator|roleplay|hidden_web_research|guidance|instruction)\b[^>]*>[\s\S]*?<\/(?:act|thought|thinking|think|cot|plot|details|action|script|director|narrator|roleplay|hidden_web_research|guidance|instruction)>/giu,
+    /```(?:act|thought|thinking|think|cot|plot|script|director|narrator)[\s\S]*?```/giu,
+    /<(?:act|thought|thinking|think|cot|plot|details|action|script|director|narrator|roleplay|hidden_web_research|guidance|instruction)\b[^>]*>[\s\S]*$/giu,
+    /\[(?:System|System Note|Author's Note|系统提示|系统通知|系统设定|剧情提示|剧情要求|导演指示|提示)[:：\s][\s\S]*?\]/giu,
+    /\((?:OOC|ooc)[:：\s][\s\S]*?\)/giu,
+]);
+
+const INJECTED_PROMPT_WRAPPER_PATTERNS = Object.freeze([
+    /(?:(?:以上|上述)(?:内容)?(?:是|为)?\s*(?:用户|玩家|提问者)?(?:的)?(?:本轮|当前|最新)?(?:输入|消息|请求|内容)[，,。；;\n\r\s]*)?(?:以下|下面)(?:是|为)?\s*(?:act|角色行动|行动|台词|剧情|设定|推进|指导|要求|导演指示)*(?:是|为)?(?:角色行动|行动和台词|角色行动和台词|剧情推进|行动指导|台词)?[:：]?[\s\S]*$/iu,
+    /(?:^|[\r\n]+)\s*(?:【|\[|#{1,6}\s*)?(?:剧情推进|角色行动|行动与台词|导演指示|剧本提示)(?:】|\]|[:：])?[\s\S]*$/iu,
+    /(?:^|[\r\n]+)\s*(?:以上(?:内容)?(?:是|为)?\s*(?:用户|玩家|提问者)?(?:的)?(?:本轮|当前|最新)?(?:输入|消息|请求|内容))[\s\S]*$/iu,
 ]);
 const EXPLICIT_SEARCH_TARGET_PATTERNS = Object.freeze([
     /(?:^|[。！？!?；;\n]\s*)(?:请|帮我|麻烦)?(?:联网|上网|网页|网络|网上|在线)?(?:搜索|搜一下|查询|查一下|检索|查证|核实|搜索一下|查询一下)\s*(?:一下|有关|关于)?\s*[:：]?\s*([^。！？!?；;\n]{2,120})/giu,
@@ -86,6 +104,33 @@ export function containsSensitiveQueryMaterial(value) {
         || containsBasicCredential(text)
         || containsNonPlaceholderMatch(text, LABELED_SECRET_PATTERN)
         || containsNonPlaceholderMatch(text, URL_SECRET_PARAMETER_PATTERN);
+}
+
+/**
+ * Strips injected preset wrappers, Chinese prompt bridge templates, action blocks
+ * (<act>...</act>), CoT / thought tags, and system notes from user-facing turn text,
+ * isolating the user's authentic input and search intent.
+ */
+export function extractCleanUserRequest(value) {
+    let raw = String(value || '');
+    if (!raw.trim()) return '';
+
+    for (const pattern of INJECTED_ARTIFACT_BLOCK_PATTERNS) {
+        pattern.lastIndex = 0;
+        raw = raw.replace(pattern, ' ');
+    }
+
+    for (const pattern of INJECTED_PROMPT_WRAPPER_PATTERNS) {
+        raw = raw.replace(pattern, ' ');
+    }
+
+    const cleaned = raw.replace(/\s+/gu, ' ').trim();
+    if (cleaned) return cleaned;
+
+    return String(value || '')
+        .replace(/<[^>]+>/gu, ' ')
+        .replace(/\s+/gu, ' ')
+        .trim();
 }
 
 /**

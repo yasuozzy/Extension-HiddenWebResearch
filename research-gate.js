@@ -1,3 +1,5 @@
+import { extractCleanUserRequest } from './query-safety.js';
+
 const HARD_OPT_OUT_PATTERN = /(?:不要|不用|无需|禁止|别)(?:再)?(?:联网|上网|进行)?(?:网页|网络|网上|在线)?(?:搜索|检索|查找|查证|核实|浏览)|(?:不要|不用|无需|禁止|别)(?:再)?(?:联网|上网)|只(?:根据|依据|使用)(?:我)?(?:上文|下文|以下|所给|提供的|已有)(?:内容|文本|资料|数据|信息)?|\b(?:(?:do not|don't|dont|without|no)\s+(?:use\s+)?(?:the\s+)?(?:web\s+)?(?:search|browse|browsing|lookup)|use\s+only\s+(?:the\s+)?provided\s+(?:context|text|data|information))\b/iu;
 const WEB_ACCESS_PATTERN = /(?:联网|上网)(?:查|搜索|检索|找|看|核实|查证)?|(?:网页|网络|网上|在线)(?:搜索|检索|查找|查证|核实|浏览)|(?:谷歌|百度|必应|searxng|serpapi|anysearch)(?:一下|搜索|查询)?|\b(?:search|browse)\s+(?:the\s+)?(?:web|internet|online)|\b(?:web\s*search|google\s+it|verify\s+online|serpapi|anysearch)\b/iu;
 const SOURCE_REQUEST_PATTERN = /官网(?:链接|地址|页面|文档)|(?:给|提供|附上|列出|标注|补充).{0,10}(?:来源|出处|引用|参考链接|官网链接|原文链接|url)|\b(?:provide|give|list|include|cite)\s+(?:me\s+)?(?:official\s+)?(?:sources?|citations?|references?|links?|urls?)\b/iu;
@@ -22,7 +24,9 @@ function normalizeGateText(value) {
 }
 
 function prepareIntentText(value) {
-    const masked = String(value || '').normalize('NFKC')
+    const rawClean = extractCleanUserRequest(value);
+    const target = rawClean || value;
+    const masked = String(target || '').normalize('NFKC')
         .replace(/```[\s\S]*?```/gu, ' ')
         .replace(/`[^`\n]{1,500}`/gu, ' ')
         .replace(/"[^"\n]{1,500}"/gu, ' ')

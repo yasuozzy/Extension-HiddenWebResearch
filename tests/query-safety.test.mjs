@@ -5,6 +5,7 @@ import {
     buildSafeFallbackQuery,
     compactSearchRequest,
     containsSensitiveQueryMaterial,
+    extractCleanUserRequest,
     validatePreparedSearchQuery,
     validateSearchQueryCandidate,
 } from '../query-safety.js';
@@ -131,5 +132,50 @@ for (const query of [
 ]) {
     assert.equal(containsSensitiveQueryMaterial(query), false, query);
 }
+
+// Tests for extractCleanUserRequest (stripping 剧情推进, <act>, thinking, etc.)
+const userPrompt = '(画面跳转到二十分钟后，蒋帅、爱音与灯三人已经推开RiNG的大门，恰好看到长崎素世正从另一侧街道款款走来。) (朝素世那边招手)hi 这里这里 (走向前打字翻译给她看)素世同学多久到的我们才从江户川乐器店过来，我们去饮品区坐着聊吧，小笨嘴跟上，素世同学也刚放学吗';
+const injectedActMessage = `${userPrompt}
+
+剧情推进
+以上是用户的本轮输入，以下act是角色行动和台词：
+<act>
+### 千早爱音
+now: 单手扶着肩膀上的吉他背带，站在RiNG门边的台阶上。
+beat: 朝走过来的素世用力挥了挥手。「そよちゃん！ここだよー！」转过身把背后黑色琴包往前往侧了侧。「看，我把吉他买下来了哦，超好看的薄荷绿！」
+initiative: 抬手推开RiNG的玻璃门，侧身示意大家先进去。「外面风变凉了，我们快点进去找位置坐下吧。」
+then: 走进店里走向靠窗的空桌子。
+
+### 高松灯
+now: 双手抱着喝空的麦茶瓶，站在门旁看手机屏幕。
+beat: 听到声音后抬头，手指下意识收紧了瓶身。「……そよちゃん。」听到那个称呼后耳根微热，默默挪动步子跟在旁边。
+initiative: 无
+then: 跟在爱音身后走进RiNG大门。
+
+### 长崎素世
+now: 提着制服包从街角走上缓坡，在RiNG门前的路灯下停住脚步。
+beat: 走上前停在几步外，目光扫过亮起的手机屏幕，神色温和。「我也是刚到没几分钟呢。月之森那边放学稍微早一点，坐电车过来很顺路。」「大家看起来很有精神呢，买到心仪的乐器了吗？」
+initiative: 无
+then: 迈步跟上爱音和灯，一起走进RiNG的室内。
+</act>`;
+
+assert.equal(extractCleanUserRequest(injectedActMessage), userPrompt);
+
+const thoughtAndPlotMessage = `查一下明天上海天气
+<thought>
+思考过程：需要查询上海的天气预报
+</thought>
+【剧情推进】
+<plot>
+明天剧情继续发展
+</plot>`;
+assert.equal(extractCleanUserRequest(thoughtAndPlotMessage), '查一下明天上海天气');
+
+const fencedCodeActMessage = `请问江户川乐器店营业时间
+\`\`\`act
+### 角色行动
+now: 走向乐器店
+\`\`\``;
+assert.equal(extractCleanUserRequest(fencedCodeActMessage), '请问江户川乐器店营业时间');
 
 console.log('Search-query safety and head-tail compaction: all assertions passed');
