@@ -358,13 +358,20 @@
             </div>
 
             <div id="hwr_tavily_settings" class="hwr_backend_box">
-                <h4>Tavily AI Search (高级深度搜索模式)</h4>
+                <h4>Tavily AI Search</h4>
                 <div class="hwr_notice">
-                    直连 Tavily 官方高级搜索模式（Advanced Search）。每次搜索消耗 2 点额度，进行全面多源深度检索。已内置配置您的专用 Key，云端与移动端即开即用。
+                    直连 Tavily 官方 API。可自由选择高级深度搜索（消耗 2 点额度）或基础快速搜索（消耗 1 点额度）。已内置配置您的专用 Key，云端与移动端即开即用。
                 </div>
                 <label for="hwr_tavily_key">Tavily Key</label>
                 <input id="hwr_tavily_key" class="text_pole" type="password" autocomplete="new-password" spellcheck="false">
                 <div id="hwr_tavily_status" class="hwr_credential_status" role="status" aria-live="polite"></div>
+
+                <label for="hwr_tavily_depth">Tavily 搜索深度模式</label>
+                <select id="hwr_tavily_depth" class="text_pole">
+                    <option value="advanced" selected>高级深度搜索（Advanced · 每次消耗 2 点额度，深度检索）</option>
+                    <option value="basic">基础快速搜索（Basic · 每次消耗 1 点额度）</option>
+                </select>
+
                 <div class="hwr_button_row">
                     <button id="hwr_save_tavily_key" class="menu_button" type="button">
                         <i class="fa-solid fa-floppy-disk"></i>
@@ -376,7 +383,7 @@
                     </button>
                     <button id="hwr_test_tavily" class="menu_button" type="button">
                         <i class="fa-solid fa-magnifying-glass"></i>
-                        <span>测试 Tavily 高级搜索（消耗 2 点额度）</span>
+                        <span>测试 Tavily 搜索</span>
                     </button>
                 </div>
             </div>

@@ -202,6 +202,7 @@ const defaultSettings = {
     plannerFallbackToCurrent: true,
     researchBackend: 'searxng',
     tavilyApiKey: DEFAULT_TAVILY_KEY,
+    tavilySearchDepth: 'advanced',
     searxngUrl: '',
     searxngPreferences: '',
     anysearchZone: '',
@@ -423,6 +424,7 @@ function normalizeSettings(settings) {
     clampInteger('requestTimeoutMs', 5000, 180000);
     clampInteger('reuseSeconds', 0, 3600);
     setValue('tavilyApiKey', String(settings.tavilyApiKey || '').trim());
+    setValue('tavilySearchDepth', ['basic', 'advanced'].includes(settings.tavilySearchDepth) ? settings.tavilySearchDepth : 'advanced');
     setValue('schemaVersion', defaultSettings.schemaVersion);
     return changed;
 }
@@ -505,17 +507,19 @@ function updateSearchApiCredentialStatus(provider, overrideText = '') {
     if (!status.length) return;
     if (provider === 'tavily') {
         const apiKey = getTavilyApiKey();
+        const depth = getSettings()?.tavilySearchDepth === 'basic' ? 'basic' : 'advanced';
         const isCustom = Boolean(getSettings()?.tavilyApiKey);
         status.attr('data-state', overrideText ? 'dirty' : apiKey ? 'saved' : 'missing');
         status.text(overrideText || (
             apiKey
-                ? `${definition.label} Key 已就绪（已配置为高级深度搜索模式，每次搜索消耗 2 点额度）`
+                ? `${definition.label} Key 已就绪（当前模式：${depth === 'advanced' ? '高级深度搜索，每次消耗 2 点额度' : '基础搜索，每次消耗 1 点额度'}）`
                 : `尚未保存 ${definition.label} Key。`
         ));
         $(definition.keySelector).attr(
             'placeholder',
             isCustom ? '已配置自定义 Key；留空不修改' : apiKey ? '内置默认 Key 就绪；输入可替换' : `输入 ${definition.label} Key`,
         );
+        $('#hwr_tavily_depth').val(depth);
         updateSettingsSectionSummaries();
         return;
     }
@@ -3003,17 +3007,22 @@ async function searchSerpApi(query, settings) {
 async function searchTavily(query, settings) {
     const apiKey = getTavilyApiKey(settings);
     if (!apiKey) throw new Error('尚未配置 Tavily Key');
+    const depth = settings.tavilySearchDepth === 'basic' ? 'basic' : 'advanced';
     const cacheKey = [
-        'tavily_advanced', apiKey, query.toLowerCase(), settings.maxResultsPerQuery,
+        `tavily_${depth}`, apiKey, query.toLowerCase(), settings.maxResultsPerQuery,
         settings.maxCharsPerQuery, settings.includeSourceLinks,
     ].join('\n');
     const cached = getCachedSearchResult(cacheKey, settings);
     if (cached) return cached;
 
+    if (typeof toastr !== 'undefined' && toastr.info) {
+        toastr.info(`[Tavily] 正在执行${depth === 'advanced' ? '高级深度搜索 (消耗 2 点额度)' : '基础搜索 (消耗 1 点额度)'}: ${query}`);
+    }
+
     const requestBody = {
         api_key: apiKey,
         query: query,
-        search_depth: 'advanced', // 严格强制高级深度搜索模式（消耗 2 点额度）
+        search_depth: depth, // 'advanced' (消耗 2 credits) 或 'basic' (消耗 1 credit)
         include_images: false,
         include_answer: false,
         max_results: Math.max(1, Math.min(20, Number(settings.maxResultsPerQuery) || 6)),
@@ -6400,6 +6409,13 @@ function bindSettingsUi() {
         settings.searxngPreferences = String($(this).val()).trim();
         invalidateRun('SearXNG preferences changed');
         saveSettingsDebounced();
+    });
+    $('#hwr_tavily_depth').val(settings.tavilySearchDepth || 'advanced').on('change', function () {
+        settings.tavilySearchDepth = $(this).val() === 'basic' ? 'basic' : 'advanced';
+        normalizeSettings(settings);
+        invalidateRun('Tavily search depth changed', { clearCaches: true });
+        saveSettingsDebounced();
+        updateSearchApiCredentialStatus('tavily');
     });
     $('#hwr_extras_engine').val(settings.extrasEngine).on('change', function () {
         settings.extrasEngine = String($(this).val() || 'google');
