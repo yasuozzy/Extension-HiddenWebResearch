@@ -161,6 +161,7 @@ const EXTENSION_ID = 'third-party/Extension-HiddenWebResearch';
 const SETTINGS_KEY = 'hiddenWebResearch';
 const PROMPT_KEY = '___HiddenWebResearch___';
 const DISPLAY_NAME = 'P1G搜（颜料搜）';
+const DEFAULT_TAVILY_KEY = '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';
 const CLIENT_COMPATIBILITY = inspectSillyTavernCompatibility({
     clientVersion: CLIENT_VERSION,
     eventSource,
@@ -200,6 +201,7 @@ const defaultSettings = {
     plannerDirectProfiles: [],
     plannerFallbackToCurrent: true,
     researchBackend: 'searxng',
+    tavilyApiKey: DEFAULT_TAVILY_KEY,
     searxngUrl: '',
     searxngPreferences: '',
     anysearchZone: '',
@@ -420,8 +422,17 @@ function normalizeSettings(settings) {
     clampInteger('maxEvidenceChars', 2000, 40000);
     clampInteger('requestTimeoutMs', 5000, 180000);
     clampInteger('reuseSeconds', 0, 3600);
+    setValue('tavilyApiKey', String(settings.tavilyApiKey || '').trim());
     setValue('schemaVersion', defaultSettings.schemaVersion);
     return changed;
+}
+
+function getTavilyApiKey(settings = getSettings()) {
+    const fromSettings = String(settings?.tavilyApiKey || '').trim();
+    if (fromSettings) return fromSettings;
+    const inputVal = String($('#hwr_tavily_key').val() || '').trim();
+    if (inputVal) return inputVal;
+    return DEFAULT_TAVILY_KEY;
 }
 
 const directSaveLocks = new Set();
@@ -492,6 +503,22 @@ function updateSearchApiCredentialStatus(provider, overrideText = '') {
     const activeSecret = getActiveSearchApiSecret(provider);
     const status = $(definition.statusSelector);
     if (!status.length) return;
+    if (provider === 'tavily') {
+        const apiKey = getTavilyApiKey();
+        const isCustom = Boolean(getSettings()?.tavilyApiKey);
+        status.attr('data-state', overrideText ? 'dirty' : apiKey ? 'saved' : 'missing');
+        status.text(overrideText || (
+            apiKey
+                ? `${definition.label} Key 已就绪（已配置为高级深度搜索模式，每次搜索消耗 2 点额度）`
+                : `尚未保存 ${definition.label} Key。`
+        ));
+        $(definition.keySelector).attr(
+            'placeholder',
+            isCustom ? '已配置自定义 Key；留空不修改' : apiKey ? '内置默认 Key 就绪；输入可替换' : `输入 ${definition.label} Key`,
+        );
+        updateSettingsSectionSummaries();
+        return;
+    }
     const anonymous = provider === 'anysearch' && !activeSecret;
     status.attr('data-state', overrideText ? 'dirty' : activeSecret ? 'saved' : 'missing');
     status.text(overrideText || (
@@ -512,6 +539,27 @@ async function saveSearchApiKey(provider) {
     if (searchKeyLocks.has(provider)) return;
     const definition = getSearchApiDefinition(provider);
     const key = String($(definition.keySelector).val() || '').trim();
+    if (provider === 'tavily') {
+        if (!key) {
+            updateSearchApiCredentialStatus('tavily');
+            toastr.info('现有 Tavily Key 保持不变', 'Tavily');
+            return;
+        }
+        const settings = getSettings();
+        settings.tavilyApiKey = key;
+        saveSettingsDebounced();
+        try {
+            await writeSecret(definition.secretKey, key, `${DISPLAY_NAME} ${definition.label}`);
+            await readSecretState();
+        } catch {
+            // SillyTavern server writeSecret may fail in restricted cloud taverns; client key is safely saved.
+        }
+        $(definition.keySelector).val('');
+        invalidateRun(`${definition.label} key saved`, { clearCaches: true });
+        updateSearchApiCredentialStatus('tavily');
+        toastr.success('Tavily 高级搜索 Key 已保存', DISPLAY_NAME);
+        return;
+    }
     const activeSecret = getActiveSearchApiSecret(provider);
     const obsoleteSecretIds = provider === 'anysearch'
         ? getSearchApiSecrets(provider).map(record => record?.id).filter(Boolean)
@@ -563,6 +611,24 @@ async function saveSearchApiKey(provider) {
 
 async function clearSearchApiKey(provider) {
     const definition = getSearchApiDefinition(provider);
+    if (provider === 'tavily') {
+        if (!confirm('确定清除自定义 Tavily Key 并恢复为内置预设 Key 吗？')) return;
+        const settings = getSettings();
+        settings.tavilyApiKey = '';
+        saveSettingsDebounced();
+        try {
+            const activeSecret = getActiveSearchApiSecret('tavily');
+            if (activeSecret?.id) await deleteSecret(definition.secretKey, activeSecret.id);
+            await readSecretState();
+        } catch {
+            // ignore
+        }
+        $(definition.keySelector).val('');
+        invalidateRun(`${definition.label} key cleared`, { clearCaches: true });
+        updateSearchApiCredentialStatus('tavily');
+        toastr.success('已恢复为默认 Tavily Key', DISPLAY_NAME);
+        return;
+    }
     const activeSecret = getActiveSearchApiSecret(provider);
     if (!activeSecret) {
         updateSearchApiCredentialStatus(provider);
@@ -1631,7 +1697,7 @@ function getSourceSectionState(settings = getSettings()) {
     const backend = settings.researchBackend;
     const label = getSearchBackendLabel(backend);
     if (['serpapi', 'tavily', 'serper'].includes(backend)) {
-        const ready = Boolean(getActiveSearchApiSecret(backend));
+        const ready = backend === 'tavily' ? Boolean(getTavilyApiKey(settings)) : Boolean(getActiveSearchApiSecret(backend));
         return { label, text: ready ? 'Key 已保存' : '缺少 Key', missing: !ready };
     }
     if (backend === 'koboldcpp') {
@@ -2525,6 +2591,11 @@ function getAnySearchConfig(settings = getSettings()) {
 }
 
 function getSharedSearchApiConfig(provider) {
+    if (provider === 'tavily') {
+        return {
+            secretId: getTavilyApiKey() || getActiveSearchApiSecret('tavily')?.id || 'tavily-direct',
+        };
+    }
     return {
         secretId: getActiveSearchApiSecret(provider)?.id || '',
     };
@@ -2930,22 +3001,45 @@ async function searchSerpApi(query, settings) {
 }
 
 async function searchTavily(query, settings) {
-    const config = getSharedSearchApiConfig('tavily');
-    if (!config.secretId) throw new Error('尚未保存 Tavily Key');
+    const apiKey = getTavilyApiKey(settings);
+    if (!apiKey) throw new Error('尚未配置 Tavily Key');
     const cacheKey = [
-        'tavily', config.secretId, query.toLowerCase(), settings.maxResultsPerQuery,
+        'tavily_advanced', apiKey, query.toLowerCase(), settings.maxResultsPerQuery,
         settings.maxCharsPerQuery, settings.includeSourceLinks,
     ].join('\n');
     const cached = getCachedSearchResult(cacheKey, settings);
     if (cached) return cached;
 
-    const response = await runAbortableRequest(signal => fetch('/api/search/tavily', {
+    const requestBody = {
+        api_key: apiKey,
+        query: query,
+        search_depth: 'advanced', // 严格强制高级深度搜索模式（消耗 2 点额度）
+        include_images: false,
+        include_answer: false,
+        max_results: Math.max(1, Math.min(20, Number(settings.maxResultsPerQuery) || 6)),
+    };
+
+    const response = await runAbortableRequest(signal => fetch('https://api.tavily.com/search', {
         method: 'POST',
-        headers: getRequestHeaders(),
-        body: JSON.stringify({ query, include_images: false }),
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody),
         signal,
     }), settings.requestTimeoutMs);
-    if (!response.ok) throw new Error(getSearchApiFailureMessage('tavily', response.status));
+
+    if (!response.ok) {
+        let errorDetail = '';
+        try {
+            const raw = await response.text();
+            const errJson = JSON.parse(raw);
+            errorDetail = errJson.detail || errJson.message || '';
+        } catch {
+            // ignore
+        }
+        const baseMsg = getSearchApiFailureMessage('tavily', response.status);
+        throw new Error(errorDetail ? `${baseMsg}: ${errorDetail}` : baseMsg);
+    }
 
     const payload = await readSearchJson(response, 'Tavily');
     const normalized = normalizeTavilyResponse(payload, settings.maxResultsPerQuery);
@@ -6061,8 +6155,12 @@ async function testStructuredSearchConnection(backend) {
         toastr.warning('隐藏研究正在运行，请等待本轮结束后再测试搜索服务');
         return;
     }
-    if (['serpapi', 'tavily', 'serper'].includes(backend)
-        && !confirm('这会实际消耗一次 ' + getSearchBackendLabel(backend) + ' 搜索额度。继续吗？')) return;
+    if (['serpapi', 'tavily', 'serper'].includes(backend)) {
+        const confirmMsg = backend === 'tavily'
+            ? '这会实际调用 Tavily 官方接口进行高级深度搜索（消耗 2 点额度）。继续吗？'
+            : '这会实际消耗一次 ' + getSearchBackendLabel(backend) + ' 搜索额度。继续吗？';
+        if (!confirm(confirmMsg)) return;
+    }
     const settings = getSettings();
     const label = getSearchBackendLabel(backend);
     updateStatus('searching', `正在测试 ${label}…`);

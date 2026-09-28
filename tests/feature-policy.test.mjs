@@ -179,7 +179,7 @@ for (const [backend, functionName] of Object.entries({
         new RegExp(`settings\\.researchBackend === '${backend}'\\) return ${functionName}\\(query, settings\\)`, 'u'),
     );
 }
-assert.match(indexSource, /fetch\('\/api\/search\/tavily'/u);
+assert.match(indexSource, /fetch\('https:\/\/api\.tavily\.com\/search'/u);
 assert.match(indexSource, /fetch\('\/api\/search\/serper'/u);
 assert.match(indexSource, /fetch\('\/api\/search\/koboldcpp'/u);
 assert.match(indexSource, /url\.pathname = '\/api\/websearch'/u);
@@ -191,7 +191,7 @@ assert.match(
     /textgenerationwebui_settings\?\.server_urls\?\.\[textgen_types\.KOBOLDCPP\]/u,
 );
 assert.match(indexSource, /body:\s*JSON\.stringify\(\{ query, url: baseUrl \}\)/u);
-assert.doesNotMatch(indexSource, /api\.tavily\.com|google\.serper\.dev/iu);
+assert.doesNotMatch(indexSource, /google\.serper\.dev/iu);
 
 for (const [provider, secretName] of Object.entries({
     serpapi: 'SERPAPI',

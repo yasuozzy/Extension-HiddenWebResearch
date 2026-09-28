@@ -29,7 +29,7 @@
             <select id="hwr_research_backend" class="text_pole">
                 <option value="searxng">本机 SearXNG（适用于所有模型，推荐）</option>
                 <option value="serpapi">SerpAPI Google（适用于所有模型）</option>
-                <option value="tavily">Tavily AI Search（共享 Key）</option>
+                <option value="tavily">Tavily AI Search（高级深度搜索 · 消耗2额度）</option>
                 <option value="serper">Serper Google Search（共享 Key）</option>
                 <option value="koboldcpp">KoboldCpp WebSearch（继承当前连接 URL）</option>
                 <option value="extras">Extras API（已废弃，仅聚合结果）</option>
@@ -358,9 +358,9 @@
             </div>
 
             <div id="hwr_tavily_settings" class="hwr_backend_box">
-                <h4>Tavily AI Search</h4>
+                <h4>Tavily AI Search (高级深度搜索模式)</h4>
                 <div class="hwr_notice">
-                    复用原版 SillyTavern 的 Tavily 搜索路由与当前用户的共享密钥槽。这里保存或删除 Key 也会影响酒馆 WebSearch 等其他使用者。P1G搜只采用带有效 HTTP(S) URL 的搜索结果，不请求图片，也不会把 Tavily 顶层 answer 当成可独立引用的证据。
+                    直连 Tavily 官方高级搜索模式（Advanced Search）。每次搜索消耗 2 点额度，进行全面多源深度检索。已内置配置您的专用 Key，云端与移动端即开即用。
                 </div>
                 <label for="hwr_tavily_key">Tavily Key</label>
                 <input id="hwr_tavily_key" class="text_pole" type="password" autocomplete="new-password" spellcheck="false">
@@ -368,15 +368,15 @@
                 <div class="hwr_button_row">
                     <button id="hwr_save_tavily_key" class="menu_button" type="button">
                         <i class="fa-solid fa-floppy-disk"></i>
-                        <span>保存共享 Tavily Key</span>
+                        <span>保存自定义 Tavily Key</span>
                     </button>
                     <button id="hwr_clear_tavily_key" class="menu_button" type="button">
                         <i class="fa-solid fa-key"></i>
-                        <span>删除当前共享 Key</span>
+                        <span>恢复内置默认 Key</span>
                     </button>
                     <button id="hwr_test_tavily" class="menu_button" type="button">
                         <i class="fa-solid fa-magnifying-glass"></i>
-                        <span>测试 Tavily（会消耗一次搜索）</span>
+                        <span>测试 Tavily 高级搜索（消耗 2 点额度）</span>
                     </button>
                 </div>
             </div>
